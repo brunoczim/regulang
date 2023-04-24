@@ -1,107 +1,100 @@
+use nom_grapheme_clusters::Span;
 use regex::Regex;
-use std::mem;
-
-macro_rules! impl_nested {
-    ($type:ident) => {
-        impl $type {
-            pub fn new() -> Self {
-                Self::default()
-            }
-
-            pub fn push(&mut self, mut expression: Expression) {
-                if let Expression::$type(other) = &mut expression {
-                    if self.sub_exprs.len() == 0 {
-                        mem::swap(self, other);
-                    } else {
-                        self.sub_exprs.append(&mut other.sub_exprs);
-                    }
-                    return;
-                }
-                self.sub_exprs.push(expression);
-            }
-
-            pub fn sub_exprs(&self) -> &[Expression] {
-                &self.sub_exprs[..]
-            }
-
-            pub fn into_sub_exprs(self) -> Vec<Expression> {
-                self.sub_exprs
-            }
-        }
-
-        impl Extend<Expression> for $type {
-            fn extend<I>(&mut self, iterable: I)
-            where
-                I: IntoIterator<Item = Expression>,
-            {
-                let iterator = iterable.into_iter();
-                let (low, _) = iterator.size_hint();
-                self.sub_exprs.reserve(low);
-                for sub_expr in iterator {
-                    self.push(sub_expr);
-                }
-            }
-        }
-
-        impl FromIterator<Expression> for $type {
-            fn from_iter<I>(iterable: I) -> Self
-            where
-                I: IntoIterator<Item = Expression>,
-            {
-                let mut this = Self::new();
-                this.extend(iterable);
-                this
-            }
-        }
-    };
-}
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct Test {
+    pub span: Option<Span>,
     pub regex: Regex,
 }
 
 #[derive(Debug, Clone)]
 pub struct Replacement {
+    pub span: Option<Span>,
     pub regex: Regex,
     pub replacement: String,
     pub is_global: bool,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Sequence {
-    sub_exprs: Vec<Expression>,
+    pub span: Option<Span>,
+    pub left: Expression,
+    pub right: Expression,
 }
 
-impl_nested! { Sequence }
-
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Conjunction {
-    sub_exprs: Vec<Expression>,
+    pub span: Option<Span>,
+    pub left: Expression,
+    pub right: Expression,
 }
 
-impl_nested! { Conjunction }
-
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Disjunction {
-    sub_exprs: Vec<Expression>,
+    pub span: Option<Span>,
+    pub left: Expression,
+    pub right: Expression,
 }
 
-impl_nested! { Disjunction }
-
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Negation {
-    sub_exprs: Vec<Expression>,
+    pub span: Option<Span>,
+    pub target: Expression,
 }
 
-impl_nested! { Negation }
+#[derive(Debug, Clone)]
+pub struct Condition {
+    pub span: Option<Span>,
+    pub then: Expression,
+    pub else_: Expression,
+}
+
+#[derive(Debug, Clone)]
+pub struct Identifier {
+    pub span: Option<Span>,
+    pub name: Arc<str>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Let {
+    pub span: Option<Span>,
+    pub bindings: Vec<Binding>,
+    pub sub_expr: Expression,
+}
+
+#[derive(Debug, Clone)]
+pub struct Binding {
+    pub span: Option<Span>,
+    pub identifier: Identifier,
+    pub definition: Expression,
+}
 
 #[derive(Debug, Clone)]
 pub enum Expression {
-    Test(Test),
-    Replacement(Replacement),
-    Sequence(Sequence),
-    Conjunction(Conjunction),
-    Disjunction(Disjunction),
-    Negation(Negation),
+    Test(Box<Test>),
+    Replacement(Box<Replacement>),
+    Sequence(Box<Sequence>),
+    Conjunction(Box<Conjunction>),
+    Disjunction(Box<Disjunction>),
+    Negation(Box<Negation>),
+    Condition(Box<Condition>),
+    Identifier(Box<Identifier>),
+    Let(Box<Let>),
+}
+
+impl Expression {
+    pub fn span(&self) -> Option<Span> {
+        match self {
+            Self::Test(expr) => expr.span.clone(),
+            Self::Replacement(expr) => expr.span.clone(),
+            Self::Sequence(expr) => expr.span.clone(),
+            Self::Conjunction(expr) => expr.span.clone(),
+            Self::Disjunction(expr) => expr.span.clone(),
+            Self::Negation(expr) => expr.span.clone(),
+            Self::Condition(expr) => expr.span.clone(),
+            Self::Identifier(expr) => expr.span.clone(),
+            Self::Let(expr) => expr.span.clone(),
+        }
+    }
 }

@@ -1,0 +1,50 @@
+0000 - false
+0001 - nor
+0010 - rabs
+0011 - nfst
+0100 - abs
+0101 - nsnd
+0110 - xor
+0111 - nand
+1000 - and
+1001 - xnor
+1010 - snd
+1011 - cond
+1100 - fst
+1101 - rcond
+1110 - or
+1111 - true
+
+<identifier> ::= /*
+    starting with either an ASCII alphabetic character or an underscore '_',
+    followed by ASCII alphanumeric characters or underscores, not forming a
+    keyword.
+*/
+
+<pattern> ::= /* regex pattern */
+
+<replacement> ::= /* sequence of characters requiring '/' to be escaped */
+
+<flag> ::= i | m | s | U | x | g
+
+<flags> ::= ε | <flag><flags> /* flag cannot be repeated */
+
+<test> ::= /<pattern>/<flags>
+
+<substitution> ::= s/<pattern>/<replacement>/<flags>
+
+<expr> ::=
+    | <test>
+    | <substitution>
+    | <expr> ; <expr>
+    | <expr> & <expr>
+    | <expr> | <expr>
+    | ! <expr>
+    | <identifier>
+    | <expr> |& <expr> |! <expr>
+    | let <bindings> in <expr>
+    | (<expr>)
+
+<binding> ::= fun <identifier> = <expr>
+
+<bindings> ::= ε | <binding> <bindings>

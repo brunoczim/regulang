@@ -1,5 +1,5 @@
 [package]
-name = "regulang"
+name = "recomb"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,5 +7,8 @@ edition = "2021"
 
 [dependencies]
 nom = "^7.1"
-nom-grapheme-clusters = "^0.1"
 regex = "^1.6"
+
+[dependencies.nom-grapheme-clusters]
+git = "https://github.com/brunoczim/nom-grapheme-clusters"
+branch = "add-symbol"
