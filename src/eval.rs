@@ -3,8 +3,8 @@ use crate::ast::{
     Disjunction,
     Expression,
     Negation,
-    Replacement,
     Sequence,
+    Substitution,
     Test,
 };
 use std::borrow::Cow;
@@ -48,16 +48,16 @@ impl Evaluable for Test {
     }
 }
 
-impl Evaluable for Replacement {
+impl Evaluable for Substitution {
     fn eval(
         &self,
         input: String,
         _guard: StackGuard,
     ) -> Result<(bool, String), TooMuchNesting> {
         let replaced = if self.is_global {
-            self.regex.replace_all(&input, &self.replacement)
+            self.regex.replace_all(&input, &self.substitute)
         } else {
-            self.regex.replace(&input, &self.replacement)
+            self.regex.replace(&input, &self.substitute)
         };
         match replaced {
             Cow::Borrowed(_) => Ok((false, input)),
@@ -154,7 +154,7 @@ impl Evaluable for Expression {
     ) -> Result<(bool, String), TooMuchNesting> {
         match self {
             Self::Test(test) => test.eval(input, guard),
-            Self::Replacement(replacement) => replacement.eval(input, guard),
+            Self::Substitution(replacement) => replacement.eval(input, guard),
             Self::Sequence(sequence) => sequence.eval(input, guard),
             Self::Conjunction(conjunction) => conjunction.eval(input, guard),
             Self::Disjunction(disjunction) => disjunction.eval(input, guard),

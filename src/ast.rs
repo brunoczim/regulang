@@ -1,79 +1,69 @@
-use nom_grapheme_clusters::Span;
+use nom_grapheme_clusters::span::Symbol;
 use regex::Regex;
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct Test {
-    pub span: Option<Span>,
     pub regex: Regex,
 }
 
 #[derive(Debug, Clone)]
-pub struct Replacement {
-    pub span: Option<Span>,
+pub struct Substitution {
     pub regex: Regex,
-    pub replacement: String,
+    pub substitute: Symbol<String>,
     pub is_global: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct Sequence {
-    pub span: Option<Span>,
-    pub left: Expression,
-    pub right: Expression,
+    pub left: Symbol<Expression>,
+    pub right: Symbol<Expression>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Conjunction {
-    pub span: Option<Span>,
-    pub left: Expression,
-    pub right: Expression,
+    pub left: Symbol<Expression>,
+    pub right: Symbol<Expression>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Disjunction {
-    pub span: Option<Span>,
-    pub left: Expression,
-    pub right: Expression,
+    pub left: Symbol<Expression>,
+    pub right: Symbol<Expression>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Negation {
-    pub span: Option<Span>,
-    pub target: Expression,
+    pub target: Symbol<Expression>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Condition {
-    pub span: Option<Span>,
-    pub then: Expression,
-    pub else_: Expression,
+    pub condition: Symbol<Expression>,
+    pub then: Symbol<Expression>,
+    pub else_: Symbol<Expression>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Identifier {
-    pub span: Option<Span>,
-    pub name: Arc<str>,
+    pub name: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct Let {
-    pub span: Option<Span>,
-    pub bindings: Vec<Binding>,
-    pub sub_expr: Expression,
+    pub bindings: Vec<Symbol<Binding>>,
+    pub sub_expr: Symbol<Expression>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Binding {
-    pub span: Option<Span>,
-    pub identifier: Identifier,
-    pub definition: Expression,
+    pub identifier: Symbol<Identifier>,
+    pub definition: Symbol<Expression>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Expression {
     Test(Box<Test>),
-    Replacement(Box<Replacement>),
+    Substitution(Box<Substitution>),
     Sequence(Box<Sequence>),
     Conjunction(Box<Conjunction>),
     Disjunction(Box<Disjunction>),
@@ -81,20 +71,4 @@ pub enum Expression {
     Condition(Box<Condition>),
     Identifier(Box<Identifier>),
     Let(Box<Let>),
-}
-
-impl Expression {
-    pub fn span(&self) -> Option<Span> {
-        match self {
-            Self::Test(expr) => expr.span.clone(),
-            Self::Replacement(expr) => expr.span.clone(),
-            Self::Sequence(expr) => expr.span.clone(),
-            Self::Conjunction(expr) => expr.span.clone(),
-            Self::Disjunction(expr) => expr.span.clone(),
-            Self::Negation(expr) => expr.span.clone(),
-            Self::Condition(expr) => expr.span.clone(),
-            Self::Identifier(expr) => expr.span.clone(),
-            Self::Let(expr) => expr.span.clone(),
-        }
-    }
 }

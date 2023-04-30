@@ -8,7 +8,4 @@ edition = "2021"
 [dependencies]
 nom = "^7.1"
 regex = "^1.6"
-
-[dependencies.nom-grapheme-clusters]
-git = "https://github.com/brunoczim/nom-grapheme-clusters"
-branch = "add-symbol"
+nom-grapheme-clusters = "^0.3.0"
