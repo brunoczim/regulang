@@ -47,15 +47,17 @@ pub enum Flag {
     G,
 }
 
+pub type Result<T> = IResult<Span, T, ErrorList>;
+
 #[derive(Debug)]
-pub enum ParseError {
+pub enum Error {
     UnknowwnFlag(Symbol<Flag>),
     DuplicateFlag(Symbol<Flag>),
     Regex(Symbol<regex::Error>),
     Nom(nom::error::Error<Span>),
 }
 
-impl Spanned for ParseError {
+impl Spanned for Error {
     fn span(&self) -> Span {
         match self {
             Self::UnknowwnFlag(segment) => segment.span(),
@@ -67,25 +69,25 @@ impl Spanned for ParseError {
 }
 
 #[derive(Debug)]
-pub struct ParseErrorList {
-    errors: Vec<ParseError>,
+pub struct ErrorList {
+    errors: Vec<Error>,
 }
 
-impl ParseErrorList {
-    pub fn new(error: ParseError) -> Self {
+impl ErrorList {
+    pub fn new(error: Error) -> Self {
         Self { errors: vec![error] }
     }
 
-    pub fn insert(&mut self, error: ParseError) {
+    pub fn insert(&mut self, error: Error) {
         let span = error.span();
         let index = self.errors.partition_point(|stored| stored.span() <= span);
         self.errors.insert(index, error);
     }
 }
 
-impl nom::error::ParseError<Span> for ParseErrorList {
+impl nom::error::ParseError<Span> for ErrorList {
     fn from_error_kind(input: Span, kind: nom::error::ErrorKind) -> Self {
-        Self::new(ParseError::Nom(nom::error::Error { input, code: kind }))
+        Self::new(Error::Nom(nom::error::Error { input, code: kind }))
     }
 
     fn append(
@@ -93,12 +95,12 @@ impl nom::error::ParseError<Span> for ParseErrorList {
         kind: nom::error::ErrorKind,
         mut other: Self,
     ) -> Self {
-        other.insert(ParseError::Nom(nom::error::Error { input, code: kind }));
+        other.insert(Error::Nom(nom::error::Error { input, code: kind }));
         other
     }
 }
 
-impl nom::error::FromExternalError<Span, Self> for ParseErrorList {
+impl nom::error::FromExternalError<Span, Self> for ErrorList {
     fn from_external_error(
         _input: Span,
         _kind: nom::error::ErrorKind,
@@ -108,7 +110,7 @@ impl nom::error::FromExternalError<Span, Self> for ParseErrorList {
     }
 }
 
-fn parse_flag(input: Span) -> IResult<Span, Flag, ParseErrorList> {
+fn parse_flag(input: Span) -> Result<Flag> {
     alt((
         value(Flag::I, segment("i")),
         value(Flag::M, segment("m")),
@@ -119,18 +121,16 @@ fn parse_flag(input: Span) -> IResult<Span, Flag, ParseErrorList> {
     ))(input)
 }
 
-fn parse_flags(
-    input: Span,
-) -> IResult<Span, HashSet<Symbol<Flag>>, ParseErrorList> {
+fn parse_flags(input: Span) -> Result<HashSet<Symbol<Flag>>> {
     let parse_seq = terminated(many0(symbol(parse_flag)), not(alpha0));
     let mut parse = map_res(parse_seq, |flags| {
         let mut visited = HashSet::new();
         let mut result = Ok(());
         for flag in flags {
             if !visited.insert(flag.clone()) {
-                let error = ParseError::DuplicateFlag(flag);
+                let error = Error::DuplicateFlag(flag);
                 match &mut result {
-                    Ok(()) => result = Err(ParseErrorList::new(error)),
+                    Ok(()) => result = Err(ErrorList::new(error)),
                     Err(error_list) => error_list.insert(error),
                 }
             }
@@ -143,7 +143,7 @@ fn parse_flags(
 fn build_regex(
     code: Span,
     mut flags: HashSet<Symbol<Flag>>,
-) -> Result<(Regex, HashSet<Symbol<Flag>>), ParseErrorList> {
+) -> ::std::result::Result<(Regex, HashSet<Symbol<Flag>>), ErrorList> {
     let mut builder = RegexBuilder::new(code.as_str());
     if flags.remove(&Flag::I) {
         builder.case_insensitive(true);
@@ -162,7 +162,7 @@ fn build_regex(
     }
     match builder.build() {
         Ok(regex) => Ok((regex, flags)),
-        Err(error) => Err(ParseErrorList::new(ParseError::Regex(Symbol {
+        Err(error) => Err(ErrorList::new(Error::Regex(Symbol {
             span: code,
             data: error,
         }))),
@@ -171,7 +171,7 @@ fn build_regex(
 
 fn parse_operator<'slice, 'seg>(
     tok: Tag<'slice, 'seg>,
-) -> impl FnMut(Span) -> IResult<Span, (), ParseErrorList> + 'slice + 'seg
+) -> impl FnMut(Span) -> Result<()> + 'slice + 'seg
 where
     'slice: 'seg,
 {
@@ -196,9 +196,7 @@ where
     )
 }
 
-fn parse_leftmost_expr(
-    input: Span,
-) -> IResult<Span, Symbol<Expression>, ParseErrorList> {
+fn parse_leftmost_expr(input: Span) -> Result<Symbol<Expression>> {
     let mut parse = alt((
         wrap_expr(parse_test, Expression::Test),
         wrap_expr(parse_substitution, Expression::Substitution),
@@ -212,7 +210,7 @@ fn parse_leftmost_expr(
 fn parse_binop<'slice, 'seg, F, T>(
     tok: Tag<'slice, 'seg>,
     mut make_op: F,
-) -> impl FnMut(Span) -> IResult<Span, Symbol<T>, ParseErrorList> + 'slice + 'seg
+) -> impl FnMut(Span) -> Result<Symbol<T>> + 'slice + 'seg
 where
     'slice: 'seg,
     T: 'slice + 'seg,
@@ -227,15 +225,15 @@ where
 fn wrap_expr<P, F, T>(
     parser: P,
     mut function: F,
-) -> impl FnMut(Span) -> IResult<Span, Symbol<Expression>, ParseErrorList>
+) -> impl FnMut(Span) -> Result<Symbol<Expression>>
 where
-    P: Parser<Span, Symbol<T>, ParseErrorList>,
+    P: Parser<Span, Symbol<T>, ErrorList>,
     F: FnMut(Box<T>) -> Expression,
 {
     map(parser, move |symbol| symbol.map(|variant| function(Box::new(variant))))
 }
 
-pub fn parse_test(input: Span) -> IResult<Span, Symbol<Test>, ParseErrorList> {
+pub fn parse_test(input: Span) -> Result<Symbol<Test>> {
     let parse_regex_char =
         alt((preceded(segment("\\"), segment("/")), any_segment));
     let parse_regex_chars =
@@ -249,9 +247,9 @@ pub fn parse_test(input: Span) -> IResult<Span, Symbol<Test>, ParseErrorList> {
     let parse = map_res(parse_regex, |(regex, flags)| {
         let mut result = Ok(Test { regex });
         for flag in flags {
-            let error = ParseError::UnknowwnFlag(flag);
+            let error = Error::UnknowwnFlag(flag);
             match &mut result {
-                Ok(_) => result = Err(ParseErrorList::new(error)),
+                Ok(_) => result = Err(ErrorList::new(error)),
                 Err(errors) => errors.insert(error),
             }
         }
@@ -260,9 +258,7 @@ pub fn parse_test(input: Span) -> IResult<Span, Symbol<Test>, ParseErrorList> {
     symbol(parse)(input)
 }
 
-pub fn parse_substitution(
-    input: Span,
-) -> IResult<Span, Symbol<Substitution>, ParseErrorList> {
+pub fn parse_substitution(input: Span) -> Result<Symbol<Substitution>> {
     let parse_char =
         || alt((preceded(segment("\\"), segment("/")), any_segment));
     let parse_regex_chars = symbol(fold_many0(parse_char(), || (), |_, _| ()));
@@ -293,9 +289,9 @@ pub fn parse_substitution(
             is_global: flags.remove(&Flag::G),
         });
         for flag in flags {
-            let error = ParseError::UnknowwnFlag(flag);
+            let error = Error::UnknowwnFlag(flag);
             match &mut result {
-                Ok(_) => result = Err(ParseErrorList::new(error)),
+                Ok(_) => result = Err(ErrorList::new(error)),
                 Err(errors) => errors.insert(error),
             }
         }
@@ -304,9 +300,7 @@ pub fn parse_substitution(
     symbol(parse)(input)
 }
 
-pub fn parse_ident(
-    input: Span,
-) -> IResult<Span, Symbol<Identifier>, ParseErrorList> {
+pub fn parse_ident(input: Span) -> Result<Symbol<Identifier>> {
     let parse_symbol = symbol(tuple((
         alt((alpha0::<Span, _>, Tag(&["_"]), Tag(&["-"]))),
         many0(alt((alphanumeric0, Tag(&["_"]), Tag(&["-"])))),
@@ -318,9 +312,7 @@ pub fn parse_ident(
     parse(input)
 }
 
-pub fn parse_binding(
-    input: Span,
-) -> IResult<Span, Symbol<Binding>, ParseErrorList> {
+pub fn parse_binding(input: Span) -> Result<Symbol<Binding>> {
     let parse_tuple = delimited(
         whitespace0,
         symbol(tuple((
@@ -341,8 +333,8 @@ pub fn parse_binding(
     parser(input)
 }
 
-pub fn parse_let(input: Span) -> IResult<Span, Symbol<Let>, ParseErrorList> {
-    let parse_let_tok = terminated::<_, _, _, ParseErrorList, _, _>(
+pub fn parse_let(input: Span) -> Result<Symbol<Let>> {
+    let parse_let_tok = terminated::<_, _, _, ErrorList, _, _>(
         Tag(&["l", "e", "t"]),
         whitespace1,
     );
@@ -359,9 +351,7 @@ pub fn parse_let(input: Span) -> IResult<Span, Symbol<Let>, ParseErrorList> {
     parse(input)
 }
 
-pub fn parse_negation(
-    input: Span,
-) -> IResult<Span, Symbol<Negation>, ParseErrorList> {
+pub fn parse_negation(input: Span) -> Result<Symbol<Negation>> {
     let parse =
         map(preceded(parse_operator(Tag(&["!"])), parse_expr), |target| {
             Negation { target }
@@ -369,27 +359,19 @@ pub fn parse_negation(
     symbol(parse)(input)
 }
 
-pub fn parse_sequence(
-    input: Span,
-) -> IResult<Span, Symbol<Sequence>, ParseErrorList> {
+pub fn parse_sequence(input: Span) -> Result<Symbol<Sequence>> {
     parse_binop(Tag(&[","]), |left, right| Sequence { left, right })(input)
 }
 
-pub fn parse_disjunction(
-    input: Span,
-) -> IResult<Span, Symbol<Disjunction>, ParseErrorList> {
+pub fn parse_disjunction(input: Span) -> Result<Symbol<Disjunction>> {
     parse_binop(Tag(&["|"]), |left, right| Disjunction { left, right })(input)
 }
 
-pub fn parse_conjunction(
-    input: Span,
-) -> IResult<Span, Symbol<Conjunction>, ParseErrorList> {
+pub fn parse_conjunction(input: Span) -> Result<Symbol<Conjunction>> {
     parse_binop(Tag(&["&"]), |left, right| Conjunction { left, right })(input)
 }
 
-pub fn parse_condition(
-    input: Span,
-) -> IResult<Span, Symbol<Condition>, ParseErrorList> {
+pub fn parse_condition(input: Span) -> Result<Symbol<Condition>> {
     let parse_tuple = tuple((
         preceded(parse_operator(Tag(&["?"])), parse_expr),
         preceded(parse_operator(Tag(&["=", ">"])), parse_expr),
@@ -403,9 +385,7 @@ pub fn parse_condition(
     }))(input)
 }
 
-pub fn parse_expr(
-    input: Span,
-) -> IResult<Span, Symbol<Expression>, ParseErrorList> {
+pub fn parse_expr(input: Span) -> Result<Symbol<Expression>> {
     let mut parse = alt((
         parse_leftmost_expr,
         wrap_expr(parse_sequence, Expression::Sequence),
