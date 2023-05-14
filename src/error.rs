@@ -19,6 +19,13 @@ where
         let index = self.errors.partition_point(|stored| stored.span() <= span);
         self.errors.insert(index, error);
     }
+
+    pub fn merge(&mut self, other: &mut Self) {
+        self.errors.reserve(other.len());
+        for error in other.errors.drain(..) {
+            self.insert(error);
+        }
+    }
 }
 
 impl<E> ErrorList<E> {
@@ -68,6 +75,11 @@ impl<E> Iterator for IntoIter<E> {
 
 pub trait ResultExt<T, E> {
     fn raise_error(&mut self, error: E);
+
+    fn merge_and_zip<U>(
+        self,
+        other: Result<U, ErrorList<E>>,
+    ) -> Result<(T, U), ErrorList<E>>;
 }
 
 impl<T, E> ResultExt<T, E> for Result<T, ErrorList<E>>
@@ -78,6 +90,20 @@ where
         match self {
             Ok(_) => *self = Err(ErrorList::new(error)),
             Err(errors) => errors.insert(error),
+        }
+    }
+
+    fn merge_and_zip<U>(
+        self,
+        other: Result<U, ErrorList<E>>,
+    ) -> Result<(T, U), ErrorList<E>> {
+        match (self, other) {
+            (Ok(left), Ok(right)) => Ok((left, right)),
+            (Err(mut left), Err(mut right)) => Err({
+                left.merge(&mut right);
+                left
+            }),
+            (Err(errors), Ok(_)) | (Ok(_), Err(errors)) => Err(errors),
         }
     }
 }

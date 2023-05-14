@@ -1,5 +1,16 @@
 use crate::{
-    ast::Identifier,
+    ast::{
+        Condition,
+        Conjunction,
+        Disjunction,
+        Expression,
+        Identifier,
+        Let,
+        Negation,
+        Sequence,
+        Substitution,
+        Test,
+    },
     error::ResultExt,
     ir::{Instruction, Label, Program},
 };
@@ -7,6 +18,7 @@ use nom_grapheme_clusters::{
     span::{Spanned, Symbol},
     Span,
 };
+use std::collections::{hash_map, HashMap};
 
 #[derive(Debug, Clone)]
 pub enum InternalError {
@@ -110,7 +122,7 @@ impl Module {
         label
     }
 
-    pub fn merge(&mut self, mut other: Self) -> &mut Self {
+    pub fn append(&mut self, mut other: Self) -> &mut Self {
         for instruction in &mut other.instructions {
             instruction.visit_labels(|link_label| match link_label {
                 LinkLabel::Linked(label) => *label += self.end(),
@@ -199,15 +211,153 @@ impl Module {
 }
 
 pub trait Compile {
-    fn compile_to_module(&self) -> Module;
+    fn compile_to_module(&self) -> Result<Module>;
 
     fn try_compile(
         &self,
     ) -> std::result::Result<Result<Program>, InternalError> {
-        self.compile_to_module().try_into_program()
+        match self.compile_to_module() {
+            Ok(module) => module.try_into_program(),
+            Err(errors) => Ok(Err(errors)),
+        }
     }
 
     fn compile(&self) -> Result<Program> {
-        self.compile_to_module().into_program()
+        self.compile_to_module()?.into_program()
+    }
+}
+
+impl Compile for Symbol<Test> {
+    fn compile_to_module(&self) -> Result<Module> {
+        let mut module = Module::new();
+        module.push_instruction(Instruction::Test(self.data.regex.clone()));
+        Ok(module)
+    }
+}
+
+impl Compile for Symbol<Substitution> {
+    fn compile_to_module(&self) -> Result<Module> {
+        let mut module = Module::new();
+        let variant = if self.data.is_global {
+            Instruction::ReplaceGlobal
+        } else {
+            Instruction::Replace
+        };
+        module.push_instruction(variant(
+            self.data.regex.clone(),
+            self.data.substitute.data.clone(),
+        ));
+        Ok(module)
+    }
+}
+
+impl Compile for Symbol<Sequence> {
+    fn compile_to_module(&self) -> Result<Module> {
+        self.data
+            .left
+            .compile_to_module()
+            .merge_and_zip(self.data.right.compile_to_module())
+            .map(|(mut left, right)| {
+                left.append(right);
+                left
+            })
+    }
+}
+
+impl Compile for Symbol<Conjunction> {
+    fn compile_to_module(&self) -> Result<Module> {
+        todo!()
+    }
+}
+
+impl Compile for Symbol<Disjunction> {
+    fn compile_to_module(&self) -> Result<Module> {
+        todo!()
+    }
+}
+
+impl Compile for Symbol<Negation> {
+    fn compile_to_module(&self) -> Result<Module> {
+        todo!()
+    }
+}
+
+impl Compile for Symbol<Condition> {
+    fn compile_to_module(&self) -> Result<Module> {
+        todo!()
+    }
+}
+
+impl Compile for Symbol<Identifier> {
+    fn compile_to_module(&self) -> Result<Module> {
+        let mut module = Module::new();
+        module.push_instruction(Instruction::Save);
+        module.push_instruction(Instruction::Jump(LinkLabel::External(
+            self.clone(),
+        )));
+        Ok(module)
+    }
+}
+
+impl Compile for Symbol<Let> {
+    fn compile_to_module(&self) -> Result<Module> {
+        let mut result = self.data.sub_expr.compile_to_module();
+        let mut env = HashMap::new();
+
+        for binding in &self.data.bindings {
+            match env.entry(binding.data.identifier.data.name.clone()) {
+                hash_map::Entry::Vacant(entry) => {
+                    let label = match &result {
+                        Ok(module) => module.end(),
+                        Err(_) => 0,
+                    };
+                    entry.insert((binding.data.identifier.span.clone(), label));
+                    let subresult = binding.data.definition.compile_to_module();
+                    result = result.merge_and_zip(subresult).map(
+                        |(mut left, right)| {
+                            left.append(right);
+                            left
+                        },
+                    );
+                },
+
+                hash_map::Entry::Occupied(entry) => {
+                    result.raise_error(Error::DuplicatedIdent {
+                        duplicated: Symbol {
+                            span: entry.get().0.clone(),
+                            data: binding.data.identifier.data.clone(),
+                        },
+                        first: binding.data.identifier.clone(),
+                    })
+                },
+            }
+        }
+
+        if let Ok(module) = &mut result {
+            for (name, (span, label)) in env {
+                module.link_external(
+                    &Symbol { span, data: Identifier { name } },
+                    label,
+                );
+            }
+        }
+
+        result
+    }
+}
+
+impl Compile for Expression {
+    fn compile_to_module(&self) -> Result<Module> {
+        match self {
+            Expression::Test(expr) => expr.compile_to_module(),
+            Expression::Substitution(expr) => expr.compile_to_module(),
+            Expression::Sequence(expr) => expr.compile_to_module(),
+            Expression::Conjunction(expr) => expr.compile_to_module(),
+            Expression::Disjunction(expr) => expr.compile_to_module(),
+            Expression::Negation(expr) => expr.compile_to_module(),
+            Expression::Condition(expr) => expr.compile_to_module(),
+            Expression::Identifier(expr) => expr.compile_to_module(),
+            Expression::Let(expr) => expr.compile_to_module(),
+        }
     }
 }
