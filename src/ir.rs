@@ -1,3 +1,4 @@
+use core::fmt;
 use regex::Regex;
 use std::sync::Arc;
 
@@ -63,6 +64,14 @@ impl<L> Instruction<L> {
 pub struct OutOfBoundsLabel {
     pub label: Label,
 }
+
+impl fmt::Display for OutOfBoundsLabel {
+    fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmtr, "label {} is out of bounds", self.label)
+    }
+}
+
+impl std::error::Error for OutOfBoundsLabel {}
 
 #[derive(Debug, Clone)]
 pub struct Program {

@@ -14,6 +14,7 @@ use crate::{
     },
     error::ResultExt,
 };
+use core::fmt;
 use nom::{
     branch::alt,
     combinator::{eof, map, map_res, not, value},
@@ -50,6 +51,19 @@ pub enum Flag {
     G,
 }
 
+impl fmt::Display for Flag {
+    fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmtr, "{}", match self {
+            Self::I => "i",
+            Self::M => "m",
+            Self::S => "s",
+            Self::U => "U",
+            Self::X => "x",
+            Self::G => "g",
+        })
+    }
+}
+
 pub type ErrorList = crate::error::ErrorList<Error>;
 
 pub type Result<T> = IResult<Span, T, ErrorList>;
@@ -62,6 +76,24 @@ pub enum Error {
     Nom(nom::error::Error<Span>),
 }
 
+impl fmt::Display for Error {
+    fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmtr, "syntax error: ")?;
+        match self {
+            Self::UnknownFlag(flag) => {
+                write!(fmtr, "unknown flag {}", flag.data)
+            },
+            Self::DuplicateFlag(flag) => {
+                write!(fmtr, "duplicate flag {}", flag.data)
+            },
+            Self::Regex(error) => write!(fmtr, "regex error, {}", error.data),
+            Self::Nom(error) => write!(fmtr, "{}", error),
+        }?;
+        write!(fmtr, " in {}", self.span().start())?;
+        Ok(())
+    }
+}
+
 impl Spanned for Error {
     fn span(&self) -> Span {
         match self {
@@ -69,6 +101,16 @@ impl Spanned for Error {
             Self::DuplicateFlag(segment) => segment.span(),
             Self::Regex(symbol) => symbol.span.clone(),
             Self::Nom(nom) => nom.input.clone(),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Regex(error) => Some(&error.data),
+            Self::Nom(error) => Some(error),
+            _ => None,
         }
     }
 }

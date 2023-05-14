@@ -1,10 +1,29 @@
 use crate::ir::{Instruction, Label, OutOfBoundsLabel, Program};
+use core::fmt;
 use std::borrow::Cow;
 
 #[derive(Debug, Clone)]
 pub enum Error {
     OutOfBoundsLabel(OutOfBoundsLabel),
     EmptyStack,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::EmptyStack => write!(fmtr, "empty stack"),
+            Self::OutOfBoundsLabel(error) => write!(fmtr, "{}", error),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::OutOfBoundsLabel(error) => Some(error),
+            _ => None,
+        }
+    }
 }
 
 impl From<OutOfBoundsLabel> for Error {

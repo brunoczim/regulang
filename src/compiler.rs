@@ -14,6 +14,7 @@ use crate::{
     error::ResultExt,
     ir::{Instruction, Label, Program},
 };
+use core::fmt;
 use nom_grapheme_clusters::{
     span::{Spanned, Symbol},
     Span,
@@ -24,6 +25,20 @@ use std::collections::{hash_map, HashMap};
 pub enum InternalError {
     UndefinedInternal(InternalLabel),
 }
+
+impl fmt::Display for InternalError {
+    fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::UndefinedInternal(label) => write!(
+                fmtr,
+                "undefined internal label {} has not been linked",
+                label
+            ),
+        }
+    }
+}
+
+impl std::error::Error for InternalError {}
 
 #[derive(Debug, Clone)]
 pub enum Error {
@@ -44,6 +59,29 @@ impl Spanned for Error {
         }
     }
 }
+
+impl fmt::Display for Error {
+    fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmtr, "link error: ")?;
+        match self {
+            Self::UndefinedIdent(ident) => {
+                write!(fmtr, "undefined identifier {}", ident.data.name)
+            },
+            Self::DuplicatedIdent { duplicated, first } => {
+                write!(
+                    fmtr,
+                    "duplicated identifier {} (first defined {})",
+                    duplicated.data.name,
+                    first.span.start()
+                )
+            },
+        }?;
+        write!(fmtr, " in {}", self.span().start())?;
+        Ok(())
+    }
+}
+
+impl std::error::Error for Error {}
 
 pub type ErrorList = crate::error::ErrorList<Error>;
 
