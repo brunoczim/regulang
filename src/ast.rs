@@ -1,4 +1,7 @@
-use nom_grapheme_clusters::span::Symbol;
+use nom_grapheme_clusters::{
+    span::{Spanned, Symbol},
+    Span,
+};
 use regex::Regex;
 
 #[derive(Debug, Clone)]
@@ -15,32 +18,32 @@ pub struct Substitution {
 
 #[derive(Debug, Clone)]
 pub struct Sequence {
-    pub left: Symbol<Expression>,
-    pub right: Symbol<Expression>,
+    pub left: Expression,
+    pub right: Expression,
 }
 
 #[derive(Debug, Clone)]
 pub struct Conjunction {
-    pub left: Symbol<Expression>,
-    pub right: Symbol<Expression>,
+    pub left: Expression,
+    pub right: Expression,
 }
 
 #[derive(Debug, Clone)]
 pub struct Disjunction {
-    pub left: Symbol<Expression>,
-    pub right: Symbol<Expression>,
+    pub left: Expression,
+    pub right: Expression,
 }
 
 #[derive(Debug, Clone)]
 pub struct Negation {
-    pub target: Symbol<Expression>,
+    pub target: Expression,
 }
 
 #[derive(Debug, Clone)]
 pub struct Condition {
-    pub condition: Symbol<Expression>,
-    pub then: Symbol<Expression>,
-    pub else_: Symbol<Expression>,
+    pub condition: Expression,
+    pub then: Expression,
+    pub else_: Expression,
 }
 
 #[derive(Debug, Clone)]
@@ -51,24 +54,40 @@ pub struct Identifier {
 #[derive(Debug, Clone)]
 pub struct Let {
     pub bindings: Vec<Symbol<Binding>>,
-    pub sub_expr: Symbol<Expression>,
+    pub sub_expr: Expression,
 }
 
 #[derive(Debug, Clone)]
 pub struct Binding {
     pub identifier: Symbol<Identifier>,
-    pub definition: Symbol<Expression>,
+    pub definition: Expression,
 }
 
 #[derive(Debug, Clone)]
 pub enum Expression {
-    Test(Box<Test>),
-    Substitution(Box<Substitution>),
-    Sequence(Box<Sequence>),
-    Conjunction(Box<Conjunction>),
-    Disjunction(Box<Disjunction>),
-    Negation(Box<Negation>),
-    Condition(Box<Condition>),
-    Identifier(Box<Identifier>),
-    Let(Box<Let>),
+    Test(Box<Symbol<Test>>),
+    Substitution(Box<Symbol<Substitution>>),
+    Sequence(Box<Symbol<Sequence>>),
+    Conjunction(Box<Symbol<Conjunction>>),
+    Disjunction(Box<Symbol<Disjunction>>),
+    Negation(Box<Symbol<Negation>>),
+    Condition(Box<Symbol<Condition>>),
+    Identifier(Box<Symbol<Identifier>>),
+    Let(Box<Symbol<Let>>),
+}
+
+impl Spanned for Expression {
+    fn span(&self) -> Span {
+        match self {
+            Expression::Test(expr) => expr.span.clone(),
+            Expression::Substitution(expr) => expr.span.clone(),
+            Expression::Sequence(expr) => expr.span.clone(),
+            Expression::Conjunction(expr) => expr.span.clone(),
+            Expression::Disjunction(expr) => expr.span.clone(),
+            Expression::Negation(expr) => expr.span.clone(),
+            Expression::Condition(expr) => expr.span.clone(),
+            Expression::Identifier(expr) => expr.span.clone(),
+            Expression::Let(expr) => expr.span.clone(),
+        }
+    }
 }

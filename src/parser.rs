@@ -1,15 +1,18 @@
-use crate::ast::{
-    Binding,
-    Condition,
-    Conjunction,
-    Disjunction,
-    Expression,
-    Identifier,
-    Let,
-    Negation,
-    Sequence,
-    Substitution,
-    Test,
+use crate::{
+    ast::{
+        Binding,
+        Condition,
+        Conjunction,
+        Disjunction,
+        Expression,
+        Identifier,
+        Let,
+        Negation,
+        Sequence,
+        Substitution,
+        Test,
+    },
+    error::ResultExt,
 };
 use nom::{
     branch::alt,
@@ -47,11 +50,13 @@ pub enum Flag {
     G,
 }
 
+pub type ErrorList = crate::error::ErrorList<Error>;
+
 pub type Result<T> = IResult<Span, T, ErrorList>;
 
 #[derive(Debug)]
 pub enum Error {
-    UnknowwnFlag(Symbol<Flag>),
+    UnknownFlag(Symbol<Flag>),
     DuplicateFlag(Symbol<Flag>),
     Regex(Symbol<regex::Error>),
     Nom(nom::error::Error<Span>),
@@ -60,28 +65,11 @@ pub enum Error {
 impl Spanned for Error {
     fn span(&self) -> Span {
         match self {
-            Self::UnknowwnFlag(segment) => segment.span(),
+            Self::UnknownFlag(segment) => segment.span(),
             Self::DuplicateFlag(segment) => segment.span(),
             Self::Regex(symbol) => symbol.span.clone(),
             Self::Nom(nom) => nom.input.clone(),
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct ErrorList {
-    errors: Vec<Error>,
-}
-
-impl ErrorList {
-    pub fn new(error: Error) -> Self {
-        Self { errors: vec![error] }
-    }
-
-    pub fn insert(&mut self, error: Error) {
-        let span = error.span();
-        let index = self.errors.partition_point(|stored| stored.span() <= span);
-        self.errors.insert(index, error);
     }
 }
 
@@ -128,11 +116,7 @@ fn parse_flags(input: Span) -> Result<HashSet<Symbol<Flag>>> {
         let mut result = Ok(());
         for flag in flags {
             if !visited.insert(flag.clone()) {
-                let error = Error::DuplicateFlag(flag);
-                match &mut result {
-                    Ok(()) => result = Err(ErrorList::new(error)),
-                    Err(error_list) => error_list.insert(error),
-                }
+                result.raise_error(Error::DuplicateFlag(flag));
             }
         }
         result.map(|_| visited)
@@ -196,7 +180,7 @@ where
     )
 }
 
-fn parse_leftmost_expr(input: Span) -> Result<Symbol<Expression>> {
+fn parse_leftmost_expr(input: Span) -> Result<Expression> {
     let mut parse = alt((
         wrap_expr(parse_test, Expression::Test),
         wrap_expr(parse_substitution, Expression::Substitution),
@@ -214,7 +198,7 @@ fn parse_binop<'slice, 'seg, F, T>(
 where
     'slice: 'seg,
     T: 'slice + 'seg,
-    F: FnMut(Symbol<Expression>, Symbol<Expression>) -> T + 'slice + 'seg,
+    F: FnMut(Expression, Expression) -> T + 'slice + 'seg,
 {
     let parse_tuple =
         tuple((parse_leftmost_expr, parse_operator(tok), parse_expr));
@@ -225,12 +209,12 @@ where
 fn wrap_expr<P, F, T>(
     parser: P,
     mut function: F,
-) -> impl FnMut(Span) -> Result<Symbol<Expression>>
+) -> impl FnMut(Span) -> Result<Expression>
 where
     P: Parser<Span, Symbol<T>, ErrorList>,
-    F: FnMut(Box<T>) -> Expression,
+    F: FnMut(Box<Symbol<T>>) -> Expression,
 {
-    map(parser, move |symbol| symbol.map(|variant| function(Box::new(variant))))
+    map(parser, move |symbol| function(Box::new(symbol)))
 }
 
 pub fn parse_test(input: Span) -> Result<Symbol<Test>> {
@@ -247,11 +231,7 @@ pub fn parse_test(input: Span) -> Result<Symbol<Test>> {
     let parse = map_res(parse_regex, |(regex, flags)| {
         let mut result = Ok(Test { regex });
         for flag in flags {
-            let error = Error::UnknowwnFlag(flag);
-            match &mut result {
-                Ok(_) => result = Err(ErrorList::new(error)),
-                Err(errors) => errors.insert(error),
-            }
+            result.raise_error(Error::UnknownFlag(flag));
         }
         result
     });
@@ -289,11 +269,7 @@ pub fn parse_substitution(input: Span) -> Result<Symbol<Substitution>> {
             is_global: flags.remove(&Flag::G),
         });
         for flag in flags {
-            let error = Error::UnknowwnFlag(flag);
-            match &mut result {
-                Ok(_) => result = Err(ErrorList::new(error)),
-                Err(errors) => errors.insert(error),
-            }
+            result.raise_error(Error::UnknownFlag(flag))
         }
         result
     });
@@ -385,7 +361,7 @@ pub fn parse_condition(input: Span) -> Result<Symbol<Condition>> {
     }))(input)
 }
 
-pub fn parse_expr(input: Span) -> Result<Symbol<Expression>> {
+pub fn parse_expr(input: Span) -> Result<Expression> {
     let mut parse = alt((
         parse_leftmost_expr,
         wrap_expr(parse_sequence, Expression::Sequence),
