@@ -40,30 +40,10 @@ pub type Result<T> = std::result::Result<T, ErrorList>;
 pub type InternalLabel = u128;
 
 #[derive(Debug, Clone)]
-pub enum UnlinkedLabel {
+pub enum LinkLabel {
+    Linked(Label),
     External(Symbol<Identifier>),
     Internal(InternalLabel),
-}
-
-#[derive(Debug, Clone)]
-pub enum LinkLabelKind {
-    Linked(Label),
-    Unlinked(UnlinkedLabel),
-}
-
-#[derive(Debug, Clone)]
-pub struct LinkLabel {
-    kind: LinkLabelKind,
-}
-
-impl LinkLabel {
-    pub fn new_unlinked(unlinked_label: UnlinkedLabel) -> Self {
-        Self { kind: LinkLabelKind::Unlinked(unlinked_label) }
-    }
-
-    pub fn kind(&self) -> &LinkLabelKind {
-        &self.kind
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -96,12 +76,9 @@ impl Module {
     ) {
         for instruction in &mut self.instructions {
             instruction.visit_labels(|label| {
-                use LinkLabelKind::*;
-                use UnlinkedLabel::*;
-
-                if let Unlinked(External(target)) = &mut label.kind {
+                if let LinkLabel::External(target) = label {
                     if target.data.name == identifier.data.name {
-                        label.kind = Linked(linked);
+                        *label = LinkLabel::Linked(linked);
                     }
                 }
             });
@@ -111,12 +88,9 @@ impl Module {
     pub fn link_internal(&mut self, internal: InternalLabel, linked: Label) {
         for instruction in &mut self.instructions {
             instruction.visit_labels(|label| {
-                use LinkLabelKind::*;
-                use UnlinkedLabel::*;
-
-                if let Unlinked(Internal(target)) = &mut label.kind {
+                if let LinkLabel::Internal(target) = label {
                     if *target == internal {
-                        label.kind = Linked(linked);
+                        *label = LinkLabel::Linked(linked);
                     }
                 }
             });
@@ -138,18 +112,14 @@ impl Module {
 
     pub fn merge(&mut self, mut other: Self) -> &mut Self {
         for instruction in &mut other.instructions {
-            use LinkLabelKind::*;
-            use UnlinkedLabel::*;
-
-            instruction.visit_labels(|link_label| match &mut link_label.kind {
-                Linked(label) => *label += self.end(),
-                Unlinked(External(_)) => (),
-                Unlinked(Internal(internal)) => {
+            instruction.visit_labels(|link_label| match link_label {
+                LinkLabel::Linked(label) => *label += self.end(),
+                LinkLabel::External(_) => (),
+                LinkLabel::Internal(internal) => {
                     *internal += self.internal_counter
                 },
             });
         }
-
         self.instructions.append(&mut other.instructions);
         self.internal_counter += other.internal_counter;
         self
@@ -164,9 +134,6 @@ impl Module {
     ) -> std::result::Result<Result<Program>, InternalError> {
         let mut result = Ok(Vec::with_capacity(self.instructions.len()));
         for instruction in self.instructions {
-            use LinkLabelKind::*;
-            use UnlinkedLabel::*;
-
             match instruction {
                 Instruction::Test(regex) => {
                     if let Ok(instructions) = &mut result {
@@ -184,17 +151,17 @@ impl Module {
                             .push(Instruction::ReplaceGlobal(regex, repl));
                     }
                 },
-                Instruction::Jump(LinkLabel { kind: Linked(label) }) => {
+                Instruction::Jump(LinkLabel::Linked(label)) => {
                     if let Ok(instructions) = &mut result {
                         instructions.push(Instruction::Jump(label));
                     }
                 },
-                Instruction::IfTrue(LinkLabel { kind: Linked(label) }) => {
+                Instruction::IfTrue(LinkLabel::Linked(label)) => {
                     if let Ok(instructions) = &mut result {
                         instructions.push(Instruction::IfTrue(label));
                     }
                 },
-                Instruction::IfFalse(LinkLabel { kind: Linked(label) }) => {
+                Instruction::IfFalse(LinkLabel::Linked(label)) => {
                     if let Ok(instructions) = &mut result {
                         instructions.push(Instruction::IfFalse(label));
                     }
@@ -214,26 +181,14 @@ impl Module {
                         instructions.push(Instruction::Discard);
                     }
                 },
-
-                Instruction::Jump(LinkLabel {
-                    kind: Unlinked(Internal(internal)),
-                })
-                | Instruction::IfTrue(LinkLabel {
-                    kind: Unlinked(Internal(internal)),
-                })
-                | Instruction::IfFalse(LinkLabel {
-                    kind: Unlinked(Internal(internal)),
-                }) => Err(InternalError::UndefinedInternal(internal))?,
-
-                Instruction::Jump(LinkLabel {
-                    kind: Unlinked(External(identifier)),
-                })
-                | Instruction::IfTrue(LinkLabel {
-                    kind: Unlinked(External(identifier)),
-                })
-                | Instruction::IfFalse(LinkLabel {
-                    kind: Unlinked(External(identifier)),
-                }) => {
+                Instruction::Jump(LinkLabel::Internal(internal))
+                | Instruction::IfTrue(LinkLabel::Internal(internal))
+                | Instruction::IfFalse(LinkLabel::Internal(internal)) => {
+                    Err(InternalError::UndefinedInternal(internal))?
+                },
+                Instruction::Jump(LinkLabel::External(identifier))
+                | Instruction::IfTrue(LinkLabel::External(identifier))
+                | Instruction::IfFalse(LinkLabel::External(identifier)) => {
                     result.raise_error(Error::UndefinedIdent(identifier));
                 },
             }
