@@ -78,16 +78,18 @@ impl Interpreter {
                 self.curr_stack_frame.data = replaced.into_owned();
             },
             Instruction::Jump(label) => self.curr_stack_frame.pc = *label,
-            Instruction::IfTrue(label) => {
+            Instruction::JumpTrue(label) => {
                 if self.curr_stack_frame.flag {
                     self.curr_stack_frame.pc = *label;
                 }
             },
-            Instruction::IfFalse(label) => {
+            Instruction::JumpFalse(label) => {
                 if !self.curr_stack_frame.flag {
                     self.curr_stack_frame.pc = *label;
                 }
             },
+            Instruction::SetTrue => self.curr_stack_frame.flag = true,
+            Instruction::SetFalse => self.curr_stack_frame.flag = false,
             Instruction::Save => {
                 let stack_frame = self.curr_stack_frame.clone();
                 self.prev_stack_frames.push(stack_frame);

@@ -168,14 +168,24 @@ impl Module {
                         instructions.push(Instruction::Jump(label));
                     }
                 },
-                Instruction::IfTrue(LinkLabel::Linked(label)) => {
+                Instruction::JumpTrue(LinkLabel::Linked(label)) => {
                     if let Ok(instructions) = &mut result {
-                        instructions.push(Instruction::IfTrue(label));
+                        instructions.push(Instruction::JumpTrue(label));
                     }
                 },
-                Instruction::IfFalse(LinkLabel::Linked(label)) => {
+                Instruction::JumpFalse(LinkLabel::Linked(label)) => {
                     if let Ok(instructions) = &mut result {
-                        instructions.push(Instruction::IfFalse(label));
+                        instructions.push(Instruction::JumpFalse(label));
+                    }
+                },
+                Instruction::SetTrue => {
+                    if let Ok(instructions) = &mut result {
+                        instructions.push(Instruction::SetTrue);
+                    }
+                },
+                Instruction::SetFalse => {
+                    if let Ok(instructions) = &mut result {
+                        instructions.push(Instruction::SetFalse);
                     }
                 },
                 Instruction::Save => {
@@ -194,13 +204,13 @@ impl Module {
                     }
                 },
                 Instruction::Jump(LinkLabel::Internal(internal))
-                | Instruction::IfTrue(LinkLabel::Internal(internal))
-                | Instruction::IfFalse(LinkLabel::Internal(internal)) => {
+                | Instruction::JumpTrue(LinkLabel::Internal(internal))
+                | Instruction::JumpFalse(LinkLabel::Internal(internal)) => {
                     Err(InternalError::UndefinedInternal(internal))?
                 },
                 Instruction::Jump(LinkLabel::External(identifier))
-                | Instruction::IfTrue(LinkLabel::External(identifier))
-                | Instruction::IfFalse(LinkLabel::External(identifier)) => {
+                | Instruction::JumpTrue(LinkLabel::External(identifier))
+                | Instruction::JumpFalse(LinkLabel::External(identifier)) => {
                     result.raise_error(Error::UndefinedIdent(identifier));
                 },
             }
@@ -266,25 +276,132 @@ impl Compile for Symbol<Sequence> {
 
 impl Compile for Symbol<Conjunction> {
     fn compile_to_module(&self) -> Result<Module> {
-        todo!()
+        self.data
+            .left
+            .compile_to_module()
+            .merge_and_zip(self.data.right.compile_to_module())
+            .map(|(left, right)| {
+                let mut module = Module::new();
+                let internal_label0 = module.create_internal();
+                let internal_label1 = module.create_internal();
+
+                module.push_instruction(Instruction::Save);
+                module.append(left);
+                module.push_instruction(Instruction::JumpFalse(
+                    LinkLabel::Internal(internal_label0),
+                ));
+                module.append(right);
+                module.push_instruction(Instruction::Discard);
+                module.push_instruction(Instruction::Jump(
+                    LinkLabel::Internal(internal_label1),
+                ));
+                let label0 = module.end();
+                module.push_instruction(Instruction::Restore);
+                let label1 = module.end();
+
+                module.link_internal(internal_label0, label0);
+                module.link_internal(internal_label1, label1);
+
+                module
+            })
     }
 }
 
 impl Compile for Symbol<Disjunction> {
     fn compile_to_module(&self) -> Result<Module> {
-        todo!()
+        self.data
+            .left
+            .compile_to_module()
+            .merge_and_zip(self.data.right.compile_to_module())
+            .map(|(left, right)| {
+                let mut module = Module::new();
+                let internal_label0 = module.create_internal();
+                let internal_label1 = module.create_internal();
+
+                module.push_instruction(Instruction::Save);
+                module.append(left);
+                module.push_instruction(Instruction::JumpTrue(
+                    LinkLabel::Internal(internal_label0),
+                ));
+                module.push_instruction(Instruction::Restore);
+                module.append(right);
+                module.push_instruction(Instruction::Jump(
+                    LinkLabel::Internal(internal_label1),
+                ));
+                let label0 = module.end();
+                module.push_instruction(Instruction::Discard);
+                let label1 = module.end();
+
+                module.link_internal(internal_label0, label0);
+                module.link_internal(internal_label1, label1);
+
+                module
+            })
     }
 }
 
 impl Compile for Symbol<Negation> {
     fn compile_to_module(&self) -> Result<Module> {
-        todo!()
+        self.data.target.compile_to_module().map(|inner| {
+            let mut module = Module::new();
+            let internal_label0 = module.create_internal();
+            let internal_label1 = module.create_internal();
+
+            module.push_instruction(Instruction::Save);
+            module.append(inner);
+            module.push_instruction(Instruction::JumpTrue(
+                LinkLabel::Internal(internal_label0),
+            ));
+            module.push_instruction(Instruction::Discard);
+            module.push_instruction(Instruction::SetTrue);
+            module.push_instruction(Instruction::Jump(LinkLabel::Internal(
+                internal_label1,
+            )));
+            let label0 = module.end();
+            module.push_instruction(Instruction::Restore);
+            module.push_instruction(Instruction::SetFalse);
+            module.push_instruction(Instruction::Jump(LinkLabel::Internal(
+                internal_label1,
+            )));
+            let label1 = module.end();
+
+            module.link_internal(internal_label0, label0);
+            module.link_internal(internal_label1, label1);
+
+            module
+        })
     }
 }
 
 impl Compile for Symbol<Condition> {
     fn compile_to_module(&self) -> Result<Module> {
-        todo!()
+        self.data
+            .condition
+            .compile_to_module()
+            .merge_and_zip(self.data.then.compile_to_module())
+            .merge_and_zip(self.data.else_.compile_to_module())
+            .map(|((cond, then), else_)| {
+                let mut module = Module::new();
+                let internal_label0 = module.create_internal();
+                let internal_label1 = module.create_internal();
+
+                module.append(cond);
+                module.push_instruction(Instruction::JumpTrue(
+                    LinkLabel::Internal(internal_label0),
+                ));
+                module.append(then);
+                module.push_instruction(Instruction::JumpTrue(
+                    LinkLabel::Internal(internal_label1),
+                ));
+                let label0 = module.end();
+                module.append(else_);
+                let label1 = module.end();
+
+                module.link_internal(internal_label0, label0);
+                module.link_internal(internal_label1, label1);
+
+                module
+            })
     }
 }
 
