@@ -41,6 +41,45 @@ use nom_grapheme_clusters::{
 use regex::{Regex, RegexBuilder};
 use std::collections::HashSet;
 
+#[derive(Debug, Clone, Copy)]
+pub struct Config {
+    stack_limit: Option<u32>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Config {
+    pub fn new() -> Self {
+        Self { stack_limit: None }
+    }
+
+    pub fn limit_stack(&mut self, sub_expr_count: u32) -> &mut Self {
+        self.stack_limit = Some(sub_expr_count);
+        self
+    }
+
+    pub fn unlimit_stack(&mut self) -> &mut Self {
+        self.stack_limit = None;
+        self
+    }
+
+    pub fn enter(self) -> impl FnMut(Span) -> Result<Self> {
+        move |input| match self.stack_limit {
+            Some(0) => Err(nom::Err::Failure(ErrorList::new(
+                Error::TooMuchRecursion(input),
+            ))),
+            Some(available) => {
+                Ok((input, Self { stack_limit: Some(available - 1), ..self }))
+            },
+            None => Ok((input, self)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Flag {
     I,
@@ -70,6 +109,7 @@ pub type Result<T> = IResult<Span, T, ErrorList>;
 
 #[derive(Debug)]
 pub enum Error {
+    TooMuchRecursion(Span),
     UnknownFlag(Symbol<Flag>),
     DuplicateFlag(Symbol<Flag>),
     Regex(Symbol<regex::Error>),
@@ -80,6 +120,9 @@ impl fmt::Display for Error {
     fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
         write!(fmtr, "syntax error: ")?;
         match self {
+            Self::TooMuchRecursion(_) => {
+                write!(fmtr, "too much syntatic nesting")
+            },
             Self::UnknownFlag(flag) => {
                 write!(fmtr, "unknown flag {}", flag.data)
             },
@@ -97,6 +140,7 @@ impl fmt::Display for Error {
 impl Spanned for Error {
     fn span(&self) -> Span {
         match self {
+            Self::TooMuchRecursion(span) => span.clone(),
             Self::UnknownFlag(segment) => segment.span(),
             Self::DuplicateFlag(segment) => segment.span(),
             Self::Regex(symbol) => symbol.span.clone(),
@@ -222,28 +266,32 @@ where
     )
 }
 
-fn parse_leftmost_expr(input: Span) -> Result<Expression> {
-    let mut parse = alt((
+fn parse_leftmost_expr(
+    config: Config,
+) -> impl FnMut(Span) -> Result<Expression> {
+    alt((
         wrap_expr(parse_test, Expression::Test),
         wrap_expr(parse_substitution, Expression::Substitution),
         wrap_expr(parse_ident, Expression::Identifier),
-        wrap_expr(parse_negation, Expression::Negation),
-        wrap_expr(parse_let, Expression::Let),
-    ));
-    parse(input)
+        wrap_expr(parse_negation(config), Expression::Negation),
+        wrap_expr(parse_let(config), Expression::Let),
+    ))
 }
 
-fn parse_binop<'slice, 'seg, F, T>(
-    tok: Tag<'slice, 'seg>,
+fn parse_binop<'tag, F, T>(
+    config: Config,
+    tok: Tag<'tag, 'tag>,
     mut make_op: F,
-) -> impl FnMut(Span) -> Result<Symbol<T>> + 'slice + 'seg
+) -> impl FnMut(Span) -> Result<Symbol<T>> + 'tag
 where
-    'slice: 'seg,
-    T: 'slice + 'seg,
-    F: FnMut(Expression, Expression) -> T + 'slice + 'seg,
+    T: 'tag,
+    F: FnMut(Expression, Expression) -> T + 'tag,
 {
-    let parse_tuple =
-        tuple((parse_leftmost_expr, parse_operator(tok), parse_expr));
+    let parse_tuple = tuple((
+        parse_leftmost_expr(config),
+        parse_operator(tok),
+        parse_expr(config),
+    ));
     let parse = map(parse_tuple, move |(left, _, right)| make_op(left, right));
     symbol(parse)
 }
@@ -330,87 +378,99 @@ pub fn parse_ident(input: Span) -> Result<Symbol<Identifier>> {
     parse(input)
 }
 
-pub fn parse_binding(input: Span) -> Result<Symbol<Binding>> {
+pub fn parse_binding(
+    config: Config,
+) -> impl FnMut(Span) -> Result<Symbol<Binding>> {
     let parse_tuple = delimited(
         whitespace0,
         symbol(tuple((
             parse_ident,
             delimited(
                 tuple((whitespace0, segment("="), whitespace0)),
-                parse_expr,
+                parse_expr(config),
                 tuple((whitespace0, segment(";"))),
             ),
         ))),
         whitespace0,
     );
 
-    let mut parser = map(parse_tuple, |symbol| {
+    map(parse_tuple, |symbol| {
         symbol
             .map(|(identifier, definition)| Binding { identifier, definition })
-    });
-    parser(input)
+    })
 }
 
-pub fn parse_let(input: Span) -> Result<Symbol<Let>> {
+pub fn parse_let(config: Config) -> impl FnMut(Span) -> Result<Symbol<Let>> {
     let parse_let_tok = terminated::<_, _, _, ErrorList, _, _>(
         Tag(&["l", "e", "t"]),
         whitespace1,
     );
-    let parse_bindings = many0(parse_binding);
+    let parse_bindings = many0(parse_binding(config));
     let parse_in_tok = terminated(Tag(&["i", "n"]), whitespace1);
     let parse_tuple = tuple((
         preceded(parse_let_tok, parse_bindings),
-        preceded(parse_in_tok, parse_expr),
+        preceded(parse_in_tok, parse_expr(config)),
     ));
-    let mut parse = symbol(map(parse_tuple, |(bindings, sub_expr)| Let {
-        bindings,
-        sub_expr,
-    }));
-    parse(input)
+    symbol(map(parse_tuple, |(bindings, sub_expr)| Let { bindings, sub_expr }))
 }
 
-pub fn parse_negation(input: Span) -> Result<Symbol<Negation>> {
-    let parse =
-        map(preceded(parse_operator(Tag(&["!"])), parse_expr), |target| {
-            Negation { target }
-        });
-    symbol(parse)(input)
+pub fn parse_negation(
+    config: Config,
+) -> impl FnMut(Span) -> Result<Symbol<Negation>> {
+    let parse = map(
+        preceded(parse_operator(Tag(&["!"])), parse_expr(config)),
+        |target| Negation { target },
+    );
+    symbol(parse)
 }
 
-pub fn parse_sequence(input: Span) -> Result<Symbol<Sequence>> {
-    parse_binop(Tag(&[","]), |left, right| Sequence { left, right })(input)
+pub fn parse_sequence(
+    config: Config,
+) -> impl FnMut(Span) -> Result<Symbol<Sequence>> {
+    parse_binop(config, Tag(&[","]), |left, right| Sequence { left, right })
 }
 
-pub fn parse_disjunction(input: Span) -> Result<Symbol<Disjunction>> {
-    parse_binop(Tag(&["|"]), |left, right| Disjunction { left, right })(input)
+pub fn parse_disjunction(
+    config: Config,
+) -> impl FnMut(Span) -> Result<Symbol<Disjunction>> {
+    parse_binop(config, Tag(&["|"]), |left, right| Disjunction { left, right })
 }
 
-pub fn parse_conjunction(input: Span) -> Result<Symbol<Conjunction>> {
-    parse_binop(Tag(&["&"]), |left, right| Conjunction { left, right })(input)
+pub fn parse_conjunction(
+    config: Config,
+) -> impl FnMut(Span) -> Result<Symbol<Conjunction>> {
+    parse_binop(config, Tag(&["&"]), |left, right| Conjunction { left, right })
 }
 
-pub fn parse_condition(input: Span) -> Result<Symbol<Condition>> {
+pub fn parse_condition(
+    config: Config,
+) -> impl FnMut(Span) -> Result<Symbol<Condition>> {
     let parse_tuple = tuple((
-        preceded(parse_operator(Tag(&["?"])), parse_expr),
-        preceded(parse_operator(Tag(&["=", ">"])), parse_expr),
-        preceded(parse_operator(Tag(&["!", ">"])), parse_expr),
+        preceded(parse_operator(Tag(&["?"])), parse_expr(config)),
+        preceded(parse_operator(Tag(&["=", ">"])), parse_expr(config)),
+        preceded(parse_operator(Tag(&["!", ">"])), parse_expr(config)),
     ));
 
-    symbol(map(parse_tuple, |(condition, then, else_)| Condition {
+    let parse = map(parse_tuple, |(condition, then, else_)| Condition {
         condition,
         then,
         else_,
-    }))(input)
+    });
+
+    symbol(parse)
 }
 
-pub fn parse_expr(input: Span) -> Result<Expression> {
-    let mut parse = alt((
-        parse_leftmost_expr,
-        wrap_expr(parse_sequence, Expression::Sequence),
-        wrap_expr(parse_disjunction, Expression::Disjunction),
-        wrap_expr(parse_conjunction, Expression::Conjunction),
-        wrap_expr(parse_condition, Expression::Condition),
-        delimited(segment("("), parse_expr, segment(")")),
-    ));
-    parse(input)
+pub fn parse_expr(config: Config) -> impl FnMut(Span) -> Result<Expression> {
+    move |input| {
+        let (input, config) = config.enter()(input)?;
+        let mut parser = alt((
+            parse_leftmost_expr(config),
+            wrap_expr(parse_sequence(config), Expression::Sequence),
+            wrap_expr(parse_disjunction(config), Expression::Disjunction),
+            wrap_expr(parse_conjunction(config), Expression::Conjunction),
+            wrap_expr(parse_condition(config), Expression::Condition),
+            delimited(segment("("), parse_expr(config), segment(")")),
+        ));
+        parser(input)
+    }
 }
