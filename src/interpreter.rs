@@ -2,17 +2,59 @@ use crate::ir::{Instruction, Label, OutOfBoundsLabel, Program};
 use core::fmt;
 use std::borrow::Cow;
 
+#[derive(Debug, Clone, Copy)]
+pub struct Config {
+    step_limit: Option<u32>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Config {
+    pub fn new() -> Self {
+        Self { step_limit: None }
+    }
+
+    pub fn limit_steps(&mut self, sub_expr_count: u32) -> &mut Self {
+        self.step_limit = Some(sub_expr_count);
+        self
+    }
+
+    pub fn unlimit_steps(&mut self) -> &mut Self {
+        self.step_limit = None;
+        self
+    }
+
+    pub fn step(&mut self) -> Result<()> {
+        match &mut self.step_limit {
+            Some(0) => Err(Error::StepsExhausted),
+            Some(available) => {
+                *available -= 1;
+                Ok(())
+            },
+            None => Ok(()),
+        }
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
 #[derive(Debug, Clone)]
 pub enum Error {
     OutOfBoundsLabel(OutOfBoundsLabel),
+    StepsExhausted,
     EmptyStack,
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::EmptyStack => write!(fmtr, "empty stack"),
             Self::OutOfBoundsLabel(error) => write!(fmtr, "{}", error),
+            Self::StepsExhausted => write!(fmtr, "execution steps exhausted"),
+            Self::EmptyStack => write!(fmtr, "empty stack"),
         }
     }
 }
@@ -74,7 +116,19 @@ impl Interpreter {
         self.curr_stack_frame.data = data;
     }
 
-    pub fn step_next(&mut self) -> Result<bool, Error> {
+    pub fn curr_data(&self) -> &str {
+        &self.curr_stack_frame.data
+    }
+
+    pub fn flag(&self) -> bool {
+        self.curr_stack_frame.flag
+    }
+
+    pub fn pc(&self) -> Label {
+        self.curr_stack_frame.pc
+    }
+
+    pub fn step_next(&mut self) -> Result<bool> {
         let pc = self.curr_stack_frame.pc;
         self.curr_stack_frame.pc += 1;
         match self.program.get(pc)? {
@@ -123,5 +177,14 @@ impl Interpreter {
             },
         };
         Ok(true)
+    }
+
+    pub fn run(&mut self, mut config: Config) -> Result<()> {
+        loop {
+            config.step()?;
+            if self.step_next()? {
+                break Ok(());
+            }
+        }
     }
 }

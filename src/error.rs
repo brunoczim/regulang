@@ -1,109 +1,75 @@
-use nom_grapheme_clusters::span::Spanned;
-use std::{slice, vec};
+use crate::{compiler, interpreter, parser};
+use core::fmt;
+use std::io;
 
 #[derive(Debug)]
-pub struct ErrorList<E> {
-    errors: Vec<E>,
+pub enum Error {
+    IO(io::Error),
+    Parse(parser::ErrorList),
+    ParseNom(nom::Err<parser::ErrorList>),
+    Compile(compiler::ErrorList),
+    CompileInternal(compiler::InternalError),
+    Interpret(interpreter::Error),
 }
 
-impl<E> ErrorList<E>
-where
-    E: Spanned,
-{
-    pub fn new(error: E) -> Self {
-        Self { errors: vec![error] }
-    }
-
-    pub fn insert(&mut self, error: E) {
-        let span = error.span();
-        let index = self.errors.partition_point(|stored| stored.span() <= span);
-        self.errors.insert(index, error);
-    }
-
-    pub fn merge(&mut self, other: &mut Self) {
-        self.errors.reserve(other.len());
-        for error in other.errors.drain(..) {
-            self.insert(error);
-        }
+impl From<io::Error> for Error {
+    fn from(error: io::Error) -> Self {
+        Self::IO(error)
     }
 }
 
-impl<E> ErrorList<E> {
-    pub fn len(&self) -> usize {
-        self.errors.len()
-    }
-
-    pub fn iter(&self) -> Iter<E> {
-        Iter { inner: self.errors.iter() }
+impl From<parser::ErrorList> for Error {
+    fn from(errors: parser::ErrorList) -> Self {
+        Self::Parse(errors)
     }
 }
 
-impl<E> IntoIterator for ErrorList<E> {
-    type Item = E;
-    type IntoIter = IntoIter<E>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        IntoIter { inner: self.errors.into_iter() }
+impl From<nom::Err<parser::ErrorList>> for Error {
+    fn from(errors: nom::Err<parser::ErrorList>) -> Self {
+        Self::ParseNom(errors)
     }
 }
 
-#[derive(Debug)]
-pub struct Iter<'list, E> {
-    inner: slice::Iter<'list, E>,
-}
-
-impl<'list, E> Iterator for Iter<'list, E> {
-    type Item = &'list E;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
+impl From<compiler::ErrorList> for Error {
+    fn from(errors: compiler::ErrorList) -> Self {
+        Self::Compile(errors)
     }
 }
 
-#[derive(Debug)]
-pub struct IntoIter<E> {
-    inner: vec::IntoIter<E>,
-}
-
-impl<E> Iterator for IntoIter<E> {
-    type Item = E;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
+impl From<compiler::InternalError> for Error {
+    fn from(error: compiler::InternalError) -> Self {
+        Self::CompileInternal(error)
     }
 }
 
-pub trait ResultExt<T, E> {
-    fn raise_error(&mut self, error: E);
-
-    fn merge_and_zip<U>(
-        self,
-        other: Result<U, ErrorList<E>>,
-    ) -> Result<(T, U), ErrorList<E>>;
+impl From<interpreter::Error> for Error {
+    fn from(error: interpreter::Error) -> Self {
+        Self::Interpret(error)
+    }
 }
 
-impl<T, E> ResultExt<T, E> for Result<T, ErrorList<E>>
-where
-    E: Spanned,
-{
-    fn raise_error(&mut self, error: E) {
+impl fmt::Display for Error {
+    fn fmt(&self, fmtr: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Ok(_) => *self = Err(ErrorList::new(error)),
-            Err(errors) => errors.insert(error),
+            Self::IO(error) => fmt::Display::fmt(error, fmtr),
+            Self::Parse(errors) => fmt::Display::fmt(errors, fmtr),
+            Self::ParseNom(errors) => fmt::Display::fmt(errors, fmtr),
+            Self::Compile(errors) => fmt::Display::fmt(errors, fmtr),
+            Self::CompileInternal(error) => fmt::Display::fmt(error, fmtr),
+            Self::Interpret(error) => fmt::Display::fmt(error, fmtr),
         }
     }
+}
 
-    fn merge_and_zip<U>(
-        self,
-        other: Result<U, ErrorList<E>>,
-    ) -> Result<(T, U), ErrorList<E>> {
-        match (self, other) {
-            (Ok(left), Ok(right)) => Ok((left, right)),
-            (Err(mut left), Err(mut right)) => Err({
-                left.merge(&mut right);
-                left
-            }),
-            (Err(errors), Ok(_)) | (Ok(_), Err(errors)) => Err(errors),
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::IO(error) => Some(error),
+            Self::Parse(errors) => Some(errors),
+            Self::ParseNom(errors) => Some(errors),
+            Self::Compile(errors) => Some(errors),
+            Self::CompileInternal(error) => Some(error),
+            Self::Interpret(error) => Some(error),
         }
     }
 }

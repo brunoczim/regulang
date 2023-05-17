@@ -9,3 +9,16 @@ edition = "2021"
 nom = "^7.1"
 regex = "^1.6"
 nom-grapheme-clusters = "^0.3.0"
+
+[dependencies.clap]
+version = "4.2.7"
+features = ["derive"]
+optional = true
+
+[features]
+cli = ["clap"]
+default = ["cli"]
+
+[[bin]]
+name = "recomb"
+required-features = ["cli"]

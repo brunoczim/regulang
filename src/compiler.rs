@@ -11,7 +11,7 @@ use crate::{
         Substitution,
         Test,
     },
-    error::ResultExt,
+    error_list::ResultExt,
     ir::{Instruction, Label, Program},
 };
 use core::fmt;
@@ -83,7 +83,7 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-pub type ErrorList = crate::error::ErrorList<Error>;
+pub type ErrorList = crate::error_list::ErrorList<Error>;
 
 pub type Result<T> = std::result::Result<T, ErrorList>;
 

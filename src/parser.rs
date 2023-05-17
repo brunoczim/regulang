@@ -12,7 +12,7 @@ use crate::{
         Substitution,
         Test,
     },
-    error::ResultExt,
+    error_list::ResultExt,
 };
 use core::fmt;
 use nom::{
@@ -103,7 +103,7 @@ impl fmt::Display for Flag {
     }
 }
 
-pub type ErrorList = crate::error::ErrorList<Error>;
+pub type ErrorList = crate::error_list::ErrorList<Error>;
 
 pub type Result<T> = IResult<Span, T, ErrorList>;
 
