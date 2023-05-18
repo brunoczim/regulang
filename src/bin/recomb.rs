@@ -31,17 +31,17 @@ fn read_stdin() -> Result<String> {
 
 fn try_main() -> Result<()> {
     let config = Config::parse();
-    let program = match (config.program_arg, config.program_file) {
-        (Some(program), None) => program,
-        (None, Some(path)) => fs::read_to_string(path)?,
-        (None, None) => read_stdin()?,
-        (Some(_), Some(_)) => unreachable!(),
-    };
-    let (prog_name, input) = match config.input {
-        Some(path) => {
+    let (prog_name, program) = match (config.program_arg, config.program_file) {
+        (Some(program), None) => (String::from("<argument>"), program),
+        (None, Some(path)) => {
             (path.to_string_lossy().into_owned(), fs::read_to_string(path)?)
         },
-        None => (String::from("<stdin>"), read_stdin()?),
+        (None, None) => (String::from("<stdin>"), read_stdin()?),
+        (Some(_), Some(_)) => unreachable!(),
+    };
+    let input = match config.input {
+        Some(path) => fs::read_to_string(path)?,
+        None => read_stdin()?,
     };
     let mut parse_config = parser::Config::new();
     if let Some(limit) = config.syntax_nesting_limit {

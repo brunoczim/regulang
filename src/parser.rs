@@ -269,13 +269,16 @@ where
 fn parse_leftmost_expr(
     config: Config,
 ) -> impl FnMut(Span) -> Result<Expression> {
-    alt((
-        wrap_expr(parse_test, Expression::Test),
-        wrap_expr(parse_substitution, Expression::Substitution),
-        wrap_expr(parse_ident, Expression::Identifier),
-        wrap_expr(parse_negation(config), Expression::Negation),
-        wrap_expr(parse_let(config), Expression::Let),
-    ))
+    move |input| {
+        let mut parser = alt((
+            wrap_expr(parse_test, Expression::Test),
+            wrap_expr(parse_substitution, Expression::Substitution),
+            wrap_expr(parse_ident, Expression::Identifier),
+            wrap_expr(parse_negation(config), Expression::Negation),
+            wrap_expr(parse_let(config), Expression::Let),
+        ));
+        parser(input)
+    }
 }
 
 fn parse_binop<'tag, F, T>(
@@ -329,8 +332,12 @@ pub fn parse_test(input: Span) -> Result<Symbol<Test>> {
 }
 
 pub fn parse_substitution(input: Span) -> Result<Symbol<Substitution>> {
-    let parse_char =
-        || alt((preceded(segment("\\"), segment("/")), any_segment));
+    let parse_char = || {
+        alt((
+            preceded(segment("\\"), alt((segment("/"), segment("\\")))),
+            any_segment,
+        ))
+    };
     let parse_regex_chars = symbol(fold_many0(parse_char(), || (), |_, _| ()));
     let parse_substitute_chars =
         symbol(fold_many0(parse_char(), String::new, |mut buf, segment| {
@@ -352,7 +359,7 @@ pub fn parse_substitution(input: Span) -> Result<Symbol<Substitution>> {
             build_regex(pattern.span, flags)
                 .map(|(regex, flags)| (regex, substitute, flags))
         });
-    let parse = map_res(parse_regex, |(regex, substitute, mut flags)| {
+    let mut parse = map_res(parse_regex, |(regex, substitute, mut flags)| {
         let mut result = Ok(Substitution {
             regex,
             substitute,

@@ -53,7 +53,16 @@ impl fmt::Display for Error {
         match self {
             Self::IO(error) => fmt::Display::fmt(error, fmtr),
             Self::Parse(errors) => fmt::Display::fmt(errors, fmtr),
-            Self::ParseNom(errors) => fmt::Display::fmt(errors, fmtr),
+            Self::ParseNom(nom::Err::Error(errors))
+            | Self::ParseNom(nom::Err::Failure(errors)) => {
+                fmt::Display::fmt(errors, fmtr)
+            },
+            Self::ParseNom(nom::Err::Incomplete(nom::Needed::Unknown)) => {
+                write!(fmtr, "unknown number of graphemes needed")
+            },
+            Self::ParseNom(nom::Err::Incomplete(nom::Needed::Size(size))) => {
+                write!(fmtr, "{} graphemes needed", size)
+            },
             Self::Compile(errors) => fmt::Display::fmt(errors, fmtr),
             Self::CompileInternal(error) => fmt::Display::fmt(error, fmtr),
             Self::Interpret(error) => fmt::Display::fmt(error, fmtr),
